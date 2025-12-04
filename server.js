@@ -7,7 +7,12 @@ import fetch from "node-fetch";
 dotenv.config();
 
 const app = express();
-app.use(cors());
+const app = express();
+app.use(cors({
+    origin: "https://tashercrypto.github.io",          
+    methods: "GET,POST",
+    allowedHeaders: "Content-Type,Authorization"
+}));
 app.use(express.json({ limit: "50mb" }));
 
 const upload = multer();
