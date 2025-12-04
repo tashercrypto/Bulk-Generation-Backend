@@ -11,10 +11,14 @@ const app = express();
 const upload = multer();
 
 app.use(cors({
-  origin: "https://tashercrypto.github.io",   
-  methods: "GET,POST",
-  allowedHeaders: "Content-Type",
+  origin: [
+    "https://tashercrypto.github.io",
+    "http://localhost:5500",
+    "http://localhost:3000"
+  ],
+  methods: "GET,POST"
 }));
+
 
 app.post("/edit-image", upload.array("images"), async (req, res) => {
   try {
