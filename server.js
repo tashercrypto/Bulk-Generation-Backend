@@ -13,11 +13,14 @@ const upload = multer();
 app.use(cors({
   origin: [
     "https://tashercrypto.github.io",
+    "https://tashercrypto.github.io/Bulk-Generation",
+    "https://tashercrypto.github.io/Bulk-Generation/",
     "http://localhost:5500",
     "http://localhost:3000"
   ],
   methods: "GET,POST"
 }));
+
 
 
 app.post("/edit-image", upload.array("images"), async (req, res) => {
