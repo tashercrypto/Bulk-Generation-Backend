@@ -1,21 +1,20 @@
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import multer from "multer";
+import FormData from "form-data";  
 import fetch from "node-fetch";
+import dotenv from "dotenv";
 
 dotenv.config();
 
 const app = express();
-const app = express();
-app.use(cors({
-    origin: "https://tashercrypto.github.io",          
-    methods: "GET,POST",
-    allowedHeaders: "Content-Type,Authorization"
-}));
-app.use(express.json({ limit: "50mb" }));
-
 const upload = multer();
+
+app.use(cors({
+  origin: "https://tashercrypto.github.io",   
+  methods: "GET,POST",
+  allowedHeaders: "Content-Type",
+}));
 
 app.post("/edit-image", upload.array("images"), async (req, res) => {
   try {
@@ -26,21 +25,23 @@ app.post("/edit-image", upload.array("images"), async (req, res) => {
       return res.status(400).json({ error: "No images uploaded" });
     }
 
+    // FormData для Node.js
     const formData = new FormData();
 
     files.forEach((file) => {
-      formData.append("image[]", new Blob([file.buffer]), file.originalname);
+      formData.append("image", file.buffer, file.originalname);
     });
 
     formData.append("prompt", prompt);
     formData.append("model", "gpt-image-1");
     formData.append("size", "1024x1024");
-    formData.append("n", 1);
+    formData.append("n", "1");
 
     const response = await fetch("https://api.openai.com/v1/images/edits", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${process.env.API_KEY}`,
+        Authorization: `Bearer ${process.env.API_KEY}`,
+        ...formData.getHeaders(),
       },
       body: formData,
     });
@@ -50,9 +51,11 @@ app.post("/edit-image", upload.array("images"), async (req, res) => {
     res.json(data);
 
   } catch (err) {
-    console.error(err);
+    console.error("SERVER ERROR:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.listen(3000, () => console.log("Backend запущено на порту 3000"));
+app.listen(3000, () => {
+  console.log("Backend запущено на порту 3000");
+});
