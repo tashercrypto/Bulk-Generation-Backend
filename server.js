@@ -23,63 +23,34 @@ app.use(
   })
 );
 
-app.post("/edit-image", upload.any(), async (req, res) => {
-  console.log("===== NEW REQUEST =====");
-
+app.post("/generate-image", express.json(), async (req, res) => {
   try {
-    const prompt = req.body.prompt;
+    const { model, prompt, size, n } = req.body;
 
-    const userImage = req.files.find(f => f.fieldname === "image");
-    const maskFile = req.files.find(f => f.fieldname === "mask");
-
-    console.log("User image:", !!userImage);
-    console.log("Mask:", !!maskFile);
-    console.log("Prompt:", prompt);
-
-    if (!userImage) {
-      return res.status(400).json({ error: "Main image is required" });
-    }
-
-    const formData = new FormData();
-
-    // main image
-    formData.append("image", userImage.buffer, {
-      filename: userImage.originalname,
-      contentType: userImage.mimetype,
-    });
-
-    // mask (optional)
-    if (maskFile) {
-      formData.append("mask", maskFile.buffer, {
-        filename: maskFile.originalname,
-        contentType: maskFile.mimetype,
-      });
-    }
-
-    formData.append("prompt", prompt);
-    formData.append("model", "gpt-image-1");
-    formData.append("size", "1024x1024");
-    formData.append("n", "1");
-
-    const response = await fetch("https://api.openai.com/v1/images/edits", {
+    const response = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${process.env.API_KEY}`,
-        ...formData.getHeaders(),
+        "Content-Type": "application/json"
       },
-      body: formData,
+      body: JSON.stringify({
+        model,
+        prompt,
+        size,
+        n
+      })
     });
 
     const raw = await response.text();
-    console.log("OpenAI raw response:", raw);
+    console.log("OpenAI raw:", raw);
 
-    return res.send(raw);
-
+    res.send(raw);
   } catch (err) {
     console.error("SERVER ERROR:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
+
 
 
 const PORT = process.env.PORT || 3000;
