@@ -31,25 +31,26 @@ app.post("/generate-image", express.json(), async (req, res) => {
       method: "POST",
       headers: {
         Authorization: `Bearer ${process.env.API_KEY}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model,
         prompt,
         size,
-        n
-      })
+        n,
+      }),
     });
 
     const raw = await response.text();
-    console.log("OpenAI raw:", raw);
+    console.log("OpenAI Response:", raw);
 
     res.send(raw);
   } catch (err) {
     console.error("SERVER ERROR:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: { message: err.message } });
   }
 });
+
 
 
 
