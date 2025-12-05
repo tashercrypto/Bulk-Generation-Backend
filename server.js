@@ -42,8 +42,12 @@ app.post("/edit-image", upload.array("images"), async (req, res) => {
 
 
     files.forEach((file) => {
-      formData.append("image", file.buffer, file.originalname);
+      formData.append("images", file.buffer, {
+        filename: file.originalname,
+        contentType: file.mimetype,
+      });
     });
+
 
     formData.append("prompt", prompt);
     formData.append("model", "gpt-image-1");
