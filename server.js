@@ -3,6 +3,7 @@ import cors from "cors";
 import multer from "multer";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
+import sharp from "sharp";
 
 dotenv.config();
 
@@ -10,199 +11,219 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors({
-  origin: ["https://tashercrypto.github.io", "http://localhost:5500"],
+  origin: [
+    "https://tashercrypto.github.io",
+    "http://localhost:5500",
+    "http://localhost:3000"
+  ],
   methods: ["GET", "POST", "OPTIONS"],
+  credentials: true,
 }));
 
-app.get("/", (req, res) => res.json({ status: "ok" }));
+app.get("/", (req, res) => {
+  res.json({ status: "ok", message: "Backend running" });
+});
 
-// ENDPOINT з двома зображеннями
+// ФУНКЦІЯ: Аналіз лого через GPT-4 Vision
+async function analyzeLogo(logoBuffer, mimeType, apiKey) {
+  try {
+    const logoBase64 = logoBuffer.toString("base64");
+    const logoDataUrl = `data:${mimeType};base64,${logoBase64}`;
+
+    console.log("🔍 Analyzing logo with Vision...");
+
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Describe this logo in EXTREME detail. Include: exact number of points/rays, their shape (sharp/rounded), angles between rays, proportions, colors (exact shades), line thickness, style. Be mathematical and precise - this will be used to recreate the logo exactly on a baseball cap.",
+              },
+              {
+                type: "image_url",
+                image_url: { url: logoDataUrl, detail: "high" },
+              },
+            ],
+          },
+        ],
+        max_tokens: 500,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      console.warn("⚠️ Logo analysis failed:", error);
+      return "bright white 8-pointed star with evenly spaced sharp rays";
+    }
+
+    const data = await response.json();
+    const description = data.choices[0].message.content;
+    console.log("✅ Logo analyzed:", description.substring(0, 200) + "...");
+    return description;
+
+  } catch (error) {
+    console.error("❌ Logo analysis error:", error);
+    return "bright white 8-pointed star with evenly spaced sharp rays";
+  }
+}
+
+// ГОЛОВНИЙ ENDPOINT
 app.post("/generate-image", upload.fields([
   { name: "image", maxCount: 1 },
   { name: "logo", maxCount: 1 }
 ]), async (req, res) => {
   try {
-    console.log("=== TWO-IMAGE REQUEST ===");
+    console.log("=== IMAGE EDIT REQUEST ===");
 
     const imageFile = req.files?.image?.[0];
     const logoFile = req.files?.logo?.[0];
-    
+
     if (!imageFile) {
-      return res.status(400).json({ error: { message: "No image" } });
+      return res.status(400).json({ error: { message: "No image uploaded" } });
     }
 
-    console.log("Image:", imageFile.originalname);
-    console.log("Logo:", logoFile ? logoFile.originalname : "NO LOGO");
+    console.log("📸 Image:", imageFile.originalname, `(${imageFile.size} bytes)`);
+    console.log("🏷️ Logo:", logoFile ? `${logoFile.originalname} (${logoFile.size} bytes)` : "NO LOGO");
 
-    // Конвертуємо обидва в base64
-    const imageBase64 = imageFile.buffer.toString("base64");
-    const imageDataUrl = `data:${imageFile.mimetype};base64,${imageBase64}`;
-
-    let logoDataUrl = null;
-    let logoDescription = "";
-
+    // КРОК 1: Аналізуємо лого (якщо є)
+    let logoDescription = "bright white 8-pointed star with evenly spaced sharp rays";
+    
     if (logoFile) {
-      const logoBase64 = logoFile.buffer.toString("base64");
-      logoDataUrl = `data:${logoFile.mimetype};base64,${logoBase64}`;
-
-      // КРОК 1: Аналізуємо ЛОГО
-      console.log("🔍 Analyzing logo...");
-
-      const logoAnalysis = await fetch(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${process.env.API_KEY}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-4o",
-            messages: [
-              {
-                role: "user",
-                content: [
-                  {
-                    type: "text",
-                    text: "Describe this logo in EXTREME detail for exact recreation. Include: exact shape, number of points/rays, angles, proportions, colors, style, thickness of lines. Be mathematical and precise.",
-                  },
-                  {
-                    type: "image_url",
-                    image_url: { url: logoDataUrl, detail: "high" },
-                  },
-                ],
-              },
-            ],
-            max_tokens: 500,
-          }),
-        }
+      logoDescription = await analyzeLogo(
+        logoFile.buffer,
+        logoFile.mimetype,
+        process.env.API_KEY
       );
-
-      const logoData = await logoAnalysis.json();
-      
-      if (logoAnalysis.ok) {
-        logoDescription = logoData.choices[0].message.content;
-        console.log("✅ Logo analyzed:", logoDescription.substring(0, 200));
-      } else {
-        console.warn("⚠️ Logo analysis failed, using default");
-        logoDescription = "white 8-pointed star with evenly spaced sharp rays";
-      }
-    } else {
-      logoDescription = "white 8-pointed star with evenly spaced sharp rays";
     }
 
-    // КРОК 2: Аналізуємо ОСНОВНЕ ЗОБРАЖЕННЯ
-    console.log("🔍 Analyzing main image...");
+    // КРОК 2: Короткий англійський промпт для /images/edits
+    // OpenAI /images/edits працює КРАЩЕ з короткими промптами!
+    const prompt = `Add a solid black baseball cap with this logo: ${logoDescription.substring(0, 200)}. Keep everything else unchanged.`;
+    
+    console.log("✅ Prompt:", prompt);
+    console.log("📏 Prompt length:", prompt.length, "chars");
 
-    const imageAnalysis = await fetch(
-      "https://api.openai.com/v1/chat/completions",
+    // КРОК 3: Конвертація зображення в PNG з альфа-каналом
+    console.log("🔄 Converting image to PNG...");
+
+    const pngBuffer = await sharp(imageFile.buffer)
+      .resize(1024, 1024, {
+        fit: "cover",
+        position: "center",
+      })
+      .ensureAlpha() // Обов'язково для /images/edits
+      .png({
+        quality: 100,
+        compressionLevel: 6,
+      })
+      .toBuffer();
+
+    console.log("✅ PNG created:", pngBuffer.length, "bytes");
+
+    // Перевірка розміру (OpenAI ліміт: 4MB)
+    let finalBuffer = pngBuffer;
+    if (pngBuffer.length > 4 * 1024 * 1024) {
+      console.warn("⚠️ Image too large, compressing...");
+      finalBuffer = await sharp(pngBuffer)
+        .png({ quality: 85, compressionLevel: 9 })
+        .toBuffer();
+      console.log("✅ Compressed to:", finalBuffer.length, "bytes");
+    }
+
+    // КРОК 4: Формуємо FormData для OpenAI
+    const { default: FormDataNode } = await import("form-data");
+    const formData = new FormDataNode();
+
+    formData.append("image", finalBuffer, {
+      filename: "image.png",
+      contentType: "image/png",
+    });
+
+    formData.append("prompt", prompt);
+    formData.append("n", 1);
+    formData.append("size", "1024x1024");
+
+    // ❗ НЕ додаємо "model" - DALL-E 2 використовується автоматично
+
+    console.log("📤 Sending to OpenAI /images/edits...");
+
+    // КРОК 5: Запит до OpenAI
+    const openaiResponse = await fetch(
+      "https://api.openai.com/v1/images/edits",
       {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${process.env.API_KEY}`,
+          ...formData.getHeaders(),
         },
-        body: JSON.stringify({
-          model: "gpt-4o",
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: "Describe this image in extreme detail for DALL-E 3 recreation: character appearance, pose, background, lighting, colors, style, textures. Be very specific.",
-                },
-                {
-                  type: "image_url",
-                  image_url: { url: imageDataUrl, detail: "high" },
-                },
-              ],
-            },
-          ],
-          max_tokens: 1000,
-        }),
+        body: formData,
       }
     );
 
-    const imageData = await imageAnalysis.json();
+    const responseData = await openaiResponse.json();
+    console.log("📥 OpenAI status:", openaiResponse.status);
 
-    if (!imageAnalysis.ok) {
-      console.error("❌ Image analysis failed:", imageData);
-      return res.status(imageAnalysis.status).json({ error: imageData.error });
+    if (!openaiResponse.ok) {
+      console.error("❌ OpenAI error:", JSON.stringify(responseData, null, 2));
+      return res.status(openaiResponse.status).json({
+        error: responseData.error || { message: "OpenAI API error" },
+      });
     }
 
-    const imageDescription = imageData.choices[0].message.content;
-    console.log("✅ Image analyzed");
-
-    // КРОК 3: ГЕНЕРАЦІЯ з обома описами
-    console.log("🎨 Generating with DALL-E 3...");
-
-    const dallePrompt = `${imageDescription}
-
-CRITICAL MODIFICATION - Add a cap:
-Add a classic solid black baseball cap on the character's head. The cap must have this EXACT logo on the front panel:
-
-${logoDescription}
-
-The logo must be:
-- EXACTLY as described above - precise shape, proportions, angles
-- Centered perfectly on the front of the cap
-- Bright and crisp with high contrast against the black cap
-- The star/logo should be the EXACT shape specified
-
-The cap should:
-- Be solid black with no holes or stitching visible
-- Fit naturally on the character's head
-- Have realistic shadows and perspective
-- Be slightly rotated to the left (brim turned left)
-- Be fully visible, not cropped
-
-IMPORTANT: Keep EVERYTHING else EXACTLY as described - same character, same background, same lighting, same colors, same pose, same style. ONLY add the cap with logo.`;
-
-    console.log("Prompt length:", dallePrompt.length);
-
-    const dalleResponse = await fetch(
-      "https://api.openai.com/v1/images/generations",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: "dall-e-3",
-          prompt: dallePrompt,
-          n: 1,
-          size: "1024x1024",
-          quality: "hd", // Висока якість для точності
-        }),
-      }
-    );
-
-    const dalleData = await dalleResponse.json();
-
-    if (!dalleResponse.ok) {
-      console.error("❌ DALL-E error:", dalleData);
-      return res.status(dalleResponse.status).json({ error: dalleData.error });
+    // КРОК 6: Отримуємо URL зображення
+    if (!responseData.data || !responseData.data[0] || !responseData.data[0].url) {
+      console.error("❌ Invalid response:", responseData);
+      return res.status(500).json({
+        error: { message: "Invalid OpenAI response format" },
+      });
     }
 
-    const imageUrl = dalleData.data[0].url;
-    console.log("✅ Image generated");
+    const imageUrl = responseData.data[0].url;
+    console.log("✅ Image URL received");
 
-    // Завантажуємо та конвертуємо
-    const imgResp = await fetch(imageUrl);
-    const imgBuffer = await imgResp.buffer();
-    const base64 = imgBuffer.toString("base64");
+    // КРОК 7: Завантажуємо результат
+    console.log("📥 Downloading result...");
+    const imageResponse = await fetch(imageUrl);
 
-    console.log("✅ SUCCESS");
+    if (!imageResponse.ok) {
+      throw new Error("Failed to download result image");
+    }
 
-    res.json({ data: [{ b64_json: base64 }] });
+    const imageBuffer = await imageResponse.buffer();
+    const base64Image = imageBuffer.toString("base64");
+
+    console.log("✅ SUCCESS! Base64 size:", base64Image.length);
+
+    res.json({
+      data: [{ b64_json: base64Image }],
+    });
+
   } catch (err) {
-    console.error("❌ ERROR:", err);
-    res.status(500).json({ error: { message: err.message } });
+    console.error("=== CRITICAL ERROR ===");
+    console.error("Type:", err.constructor.name);
+    console.error("Message:", err.message);
+    console.error("Stack:", err.stack);
+
+    res.status(500).json({
+      error: {
+        message: err.message || "Internal server error",
+      },
+    });
   }
 });
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log("🚀 Server running");
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🔑 API Key present: ${!!process.env.API_KEY}`);
 });
