@@ -37,10 +37,12 @@ app.post("/edit-image", upload.array("images"), async (req, res) => {
       return res.status(400).json({ error: "No images uploaded" });
     }
 
+    // 👉 Формуємо дані для OpenAI
     const formData = new FormData();
 
+    // ‼️ ГОЛОВНЕ: ВИКОРИСТОВУЄМО image[] ДЛЯ МАСИВУ ЗОБРАЖЕНЬ
     files.forEach((file) => {
-      formData.append("image", file.buffer, file.originalname);
+      formData.append("image[]", file.buffer, file.originalname);
     });
 
     formData.append("prompt", prompt);
@@ -84,4 +86,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("Backend запущено на порту", PORT);
 });
-
