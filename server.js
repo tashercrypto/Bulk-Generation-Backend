@@ -23,23 +23,29 @@ app.use(
   })
 );
 
-app.post("/generate-image", express.json(), async (req, res) => {
+app.post("/generate-image", upload.any(), async (req, res) => {
   try {
-    const { model, prompt, size, n } = req.body;
+    const prompt = req.body.prompt;
 
-    const response = await fetch("https://api.openai.com/v1/images/generations", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        prompt,
-        size,
-        n,
-      }),
-    });
+    console.log("PROMPT:", prompt);
+    console.log("FILES:", req.files);
+
+    const response = await fetch(
+      "https://api.openai.com/v1/images/edits", // <= якщо з файлами !!
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.API_KEY}`,
+        },
+        body: (() => {
+          const fd = new FormData();
+          fd.append("prompt", prompt);
+          fd.append("images", req.files.find(f => f.fieldname === "image").buffer, "image.png");
+          fd.append("logo", req.files.find(f => f.fieldname === "logo").buffer, "logo.jpg");
+          return fd;
+        })(),
+      }
+    );
 
     const raw = await response.text();
     console.log("OpenAI Response:", raw);
@@ -51,6 +57,9 @@ app.post("/generate-image", express.json(), async (req, res) => {
   }
 });
 
+
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 
 
