@@ -35,9 +35,12 @@ app.post("/edit-image", upload.array("images"), async (req, res) => {
     // FormData для Node.js
     const formData = new FormData();
 
+    upload.array("images")
+
     files.forEach((file) => {
-      formData.append("image", file.buffer, file.originalname);
+      formData.append("image[]", file.buffer, file.originalname);
     });
+
 
     formData.append("prompt", prompt);
     formData.append("model", "gpt-image-1");
