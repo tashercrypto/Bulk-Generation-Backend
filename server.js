@@ -42,7 +42,7 @@ app.post("/edit-image", upload.array("images"), async (req, res) => {
 
 
     files.forEach((file) => {
-      formData.append("image[]", file.buffer, file.originalname);
+      formData.append("image", file.buffer, file.originalname);
     });
 
     formData.append("prompt", prompt);
