@@ -3,140 +3,85 @@ import cors from "cors";
 import multer from "multer";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
-import sharp from "sharp";
 
 dotenv.config();
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer();
 
-// CORS
 app.use(
   cors({
     origin: [
       "https://tashercrypto.github.io",
       "http://localhost:5500",
       "http://localhost:3000",
-      "http://127.0.0.1:5500",
     ],
     methods: ["GET", "POST", "OPTIONS"],
     credentials: true,
   })
 );
 
-// Health check
 app.get("/", (req, res) => {
-  res.json({ status: "ok", message: "Backend is running" });
+  res.json({ status: "ok" });
 });
 
-// Головний endpoint
-app.post(
-  "/generate-image",
-  upload.single("image"), // ❗ ТІЛЬКИ ОДИН ФАЙЛ
-  async (req, res) => {
-    try {
-      console.log("=== NEW REQUEST ===");
-      console.log("File received:", !!req.file);
-      console.log("Prompt length:", req.body.prompt?.length);
+// ГЕНЕРАЦІЯ ЗОБРАЖЕННЯ (без редагування)
+app.post("/generate-image", upload.single("image"), async (req, res) => {
+  try {
+    console.log("=== GENERATION REQUEST ===");
+    
+    const prompt = req.body.prompt || "A cute purple octopus character with large eyes and a smile, wearing a black baseball cap with a white 8-pointed star logo on the front. The octopus has 8 tentacles and is set against a space background with Earth visible. The style is 3D rendered, cute and cartoon-like with soft lighting.";
 
-      // Перевірки
-      if (!req.file) {
-        return res.status(400).json({ error: "No image file uploaded" });
+    console.log("Prompt:", prompt);
+    console.log("Sending to DALL-E 2...");
+
+    const response = await fetch(
+      "https://api.openai.com/v1/images/generations",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "dall-e-2", // DALL-E 2 дешевший і швидший
+          prompt: prompt,
+          n: 1,
+          size: "1024x1024",
+        }),
       }
+    );
 
-      if (!req.body.prompt) {
-        return res.status(400).json({ error: "Prompt is required" });
-      }
+    const data = await response.json();
 
-      // Обрізаємо промпт до 1000 символів
-      const prompt = req.body.prompt.slice(0, 1000);
+    console.log("Response status:", response.status);
 
-      console.log("Converting image to PNG with alpha...");
-
-      // Конвертуємо зображення в PNG з прозорістю (обов'язково для OpenAI)
-      const pngBuffer = await sharp(req.file.buffer)
-        .resize(1024, 1024, { fit: "cover" }) // Обрізаємо до 1024x1024
-        .ensureAlpha() // Додаємо альфа-канал
-        .png()
-        .toBuffer();
-
-      console.log("PNG size:", pngBuffer.length, "bytes");
-
-      // Створюємо FormData для OpenAI
-      const { default: FormDataNode } = await import("form-data");
-      const formData = new FormDataNode();
-
-      // ❗ ТІЛЬКИ image, БЕЗ mask (маска не обов'язкова)
-      formData.append("image", pngBuffer, {
-        filename: "image.png",
-        contentType: "image/png",
-      });
-
-      formData.append("prompt", prompt);
-      formData.append("n", 1);
-      formData.append("size", "1024x1024");
-
-      console.log("Sending to OpenAI API...");
-
-      // Запит до OpenAI
-      const openaiResponse = await fetch(
-        "https://api.openai.com/v1/images/edits",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${process.env.API_KEY}`,
-            ...formData.getHeaders(),
-          },
-          body: formData,
-        }
-      );
-
-      const responseData = await openaiResponse.json();
-
-      console.log("OpenAI status:", openaiResponse.status);
-
-      if (!openaiResponse.ok) {
-        console.error("OpenAI error:", responseData);
-        return res.status(openaiResponse.status).json({
-          error: responseData.error || { message: "OpenAI API error" },
-        });
-      }
-
-      // Перевіряємо відповідь
-      if (!responseData.data || !responseData.data[0]) {
-        return res.status(500).json({
-          error: { message: "Invalid response from OpenAI" },
-        });
-      }
-
-      // Отримуємо URL зображення
-      const imageUrl = responseData.data[0].url;
-      console.log("Image URL received:", imageUrl);
-
-      // Завантажуємо зображення та конвертуємо в base64
-      const imageResponse = await fetch(imageUrl);
-      const imageBuffer = await imageResponse.buffer();
-      const base64Image = imageBuffer.toString("base64");
-
-      console.log("Sending base64 image to frontend");
-
-      // Відправляємо у форматі, який очікує фронтенд
-      res.json({
-        data: [
-          {
-            b64_json: base64Image,
-          },
-        ],
-      });
-    } catch (err) {
-      console.error("=== SERVER ERROR ===");
-      console.error(err);
-      res.status(500).json({
-        error: { message: err.message || "Internal server error" },
-      });
+    if (!response.ok) {
+      console.error("OpenAI error:", data);
+      return res.status(response.status).json({ error: data.error });
     }
+
+    const imageUrl = data.data[0].url;
+    console.log("✅ Image URL:", imageUrl);
+
+    // Завантажуємо і конвертуємо в base64
+    const imageResponse = await fetch(imageUrl);
+    const imageBuffer = await imageResponse.buffer();
+    const base64 = imageBuffer.toString("base64");
+
+    console.log("✅ Sending base64 to frontend");
+
+    res.json({
+      data: [{ b64_json: base64 }],
+    });
+  } catch (err) {
+    console.error("=== ERROR ===");
+    console.error(err);
+    res.status(500).json({
+      error: { message: err.message },
+    });
   }
-);
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
