@@ -24,38 +24,42 @@ app.use(
 );
 
 app.post("/edit-image", upload.any(), async (req, res) => {
-
   console.log("===== NEW REQUEST =====");
 
   try {
-    const files = req.files;
     const prompt = req.body.prompt;
 
-    console.log("Files received:", files.length);
+    const userImage = req.files.find(f => f.fieldname === "image");
+    const maskFile = req.files.find(f => f.fieldname === "mask");
+
+    console.log("User image:", !!userImage);
+    console.log("Mask:", !!maskFile);
     console.log("Prompt:", prompt);
 
-    if (!files || files.length === 0) {
-      return res.status(400).json({ error: "No images uploaded" });
+    if (!userImage) {
+      return res.status(400).json({ error: "Main image is required" });
     }
-
 
     const formData = new FormData();
 
-
-    files.forEach((file) => {
-      formData.append("images", file.buffer, {
-        filename: file.originalname,
-        contentType: file.mimetype,
-      });
+    // main image
+    formData.append("image", userImage.buffer, {
+      filename: userImage.originalname,
+      contentType: userImage.mimetype,
     });
 
+    // mask (optional)
+    if (maskFile) {
+      formData.append("mask", maskFile.buffer, {
+        filename: maskFile.originalname,
+        contentType: maskFile.mimetype,
+      });
+    }
 
     formData.append("prompt", prompt);
     formData.append("model", "gpt-image-1");
     formData.append("size", "1024x1024");
     formData.append("n", "1");
-
-    console.log("Sending request to OpenAI...");
 
     const response = await fetch("https://api.openai.com/v1/images/edits", {
       method: "POST",
@@ -66,25 +70,17 @@ app.post("/edit-image", upload.any(), async (req, res) => {
       body: formData,
     });
 
-    console.log("OpenAI responded with status:", response.status);
-
     const raw = await response.text();
-    console.log("Raw OpenAI response:", raw);
+    console.log("OpenAI raw response:", raw);
 
-    let data;
-    try {
-      data = JSON.parse(raw);
-    } catch (err) {
-      console.error("JSON parse error:", err.message);
-      return res.status(500).json({ error: "Invalid JSON returned from OpenAI" });
-    }
+    return res.send(raw);
 
-    res.json(data);
   } catch (err) {
     console.error("SERVER ERROR:", err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
+
 
 const PORT = process.env.PORT || 3000;
 
