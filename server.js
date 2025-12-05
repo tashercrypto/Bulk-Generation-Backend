@@ -9,43 +9,92 @@ dotenv.config();
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
-app.use(
-  cors({
-    origin: [
-      "https://tashercrypto.github.io",
-      "http://localhost:5500",
-      "http://localhost:3000",
-    ],
-    methods: ["GET", "POST", "OPTIONS"],
-    credentials: true,
-  })
-);
+app.use(cors({
+  origin: ["https://tashercrypto.github.io", "http://localhost:5500"],
+  methods: ["GET", "POST", "OPTIONS"],
+}));
 
-app.get("/", (req, res) => {
-  res.json({ status: "ok", message: "Backend running" });
-});
+app.get("/", (req, res) => res.json({ status: "ok" }));
 
-// ГОЛОВНИЙ ENDPOINT - АНАЛІЗ + ГЕНЕРАЦІЯ
-app.post("/generate-image", upload.single("image"), async (req, res) => {
+// ENDPOINT з двома зображеннями
+app.post("/generate-image", upload.fields([
+  { name: "image", maxCount: 1 },
+  { name: "logo", maxCount: 1 }
+]), async (req, res) => {
   try {
-    console.log("=== NEW REQUEST ===");
+    console.log("=== TWO-IMAGE REQUEST ===");
 
-    if (!req.file) {
-      return res.status(400).json({ error: { message: "No image uploaded" } });
+    const imageFile = req.files?.image?.[0];
+    const logoFile = req.files?.logo?.[0];
+    
+    if (!imageFile) {
+      return res.status(400).json({ error: { message: "No image" } });
     }
 
-    // Конвертуємо зображення в base64
-    const base64Image = req.file.buffer.toString("base64");
-    const mimeType = req.file.mimetype || "image/png";
-    const imageDataUrl = `data:${mimeType};base64,${base64Image}`;
+    console.log("Image:", imageFile.originalname);
+    console.log("Logo:", logoFile ? logoFile.originalname : "NO LOGO");
 
-    console.log("📸 Image received:", req.file.originalname);
-    console.log("📦 Size:", req.file.size, "bytes");
+    // Конвертуємо обидва в base64
+    const imageBase64 = imageFile.buffer.toString("base64");
+    const imageDataUrl = `data:${imageFile.mimetype};base64,${imageBase64}`;
 
-    // КРОК 1: АНАЛІЗ ЗОБРАЖЕННЯ через GPT-4 Vision
-    console.log("🔍 Step 1: Analyzing image with GPT-4 Vision...");
+    let logoDataUrl = null;
+    let logoDescription = "";
 
-    const visionResponse = await fetch(
+    if (logoFile) {
+      const logoBase64 = logoFile.buffer.toString("base64");
+      logoDataUrl = `data:${logoFile.mimetype};base64,${logoBase64}`;
+
+      // КРОК 1: Аналізуємо ЛОГО
+      console.log("🔍 Analyzing logo...");
+
+      const logoAnalysis = await fetch(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.API_KEY}`,
+          },
+          body: JSON.stringify({
+            model: "gpt-4o",
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: "Describe this logo in EXTREME detail for exact recreation. Include: exact shape, number of points/rays, angles, proportions, colors, style, thickness of lines. Be mathematical and precise.",
+                  },
+                  {
+                    type: "image_url",
+                    image_url: { url: logoDataUrl, detail: "high" },
+                  },
+                ],
+              },
+            ],
+            max_tokens: 500,
+          }),
+        }
+      );
+
+      const logoData = await logoAnalysis.json();
+      
+      if (logoAnalysis.ok) {
+        logoDescription = logoData.choices[0].message.content;
+        console.log("✅ Logo analyzed:", logoDescription.substring(0, 200));
+      } else {
+        console.warn("⚠️ Logo analysis failed, using default");
+        logoDescription = "white 8-pointed star with evenly spaced sharp rays";
+      }
+    } else {
+      logoDescription = "white 8-pointed star with evenly spaced sharp rays";
+    }
+
+    // КРОК 2: Аналізуємо ОСНОВНЕ ЗОБРАЖЕННЯ
+    console.log("🔍 Analyzing main image...");
+
+    const imageAnalysis = await fetch(
       "https://api.openai.com/v1/chat/completions",
       {
         method: "POST",
@@ -61,32 +110,11 @@ app.post("/generate-image", upload.single("image"), async (req, res) => {
               content: [
                 {
                   type: "text",
-                  text: `Analyze this image in extreme detail for DALL-E 3 recreation. Describe EVERYTHING:
-
-CHARACTER:
-- Exact appearance, colors, features
-- Pose, expression, body parts
-- Textures, materials, shine/matte
-- Size proportions
-
-BACKGROUND:
-- What's visible (space, Earth, stars, etc)
-- Colors, lighting, atmosphere
-- Depth, perspective
-
-STYLE:
-- 3D/2D, realistic/cartoon
-- Rendering quality, lighting type
-- Overall mood and aesthetic
-
-Be extremely specific and detailed. This description will be used to recreate the image exactly.`,
+                  text: "Describe this image in extreme detail for DALL-E 3 recreation: character appearance, pose, background, lighting, colors, style, textures. Be very specific.",
                 },
                 {
                   type: "image_url",
-                  image_url: {
-                    url: imageDataUrl,
-                    detail: "high",
-                  },
+                  image_url: { url: imageDataUrl, detail: "high" },
                 },
               ],
             },
@@ -96,36 +124,42 @@ Be extremely specific and detailed. This description will be used to recreate th
       }
     );
 
-    const visionData = await visionResponse.json();
+    const imageData = await imageAnalysis.json();
 
-    if (!visionResponse.ok) {
-      console.error("❌ Vision API error:", visionData);
-      return res.status(visionResponse.status).json({
-        error: visionData.error || { message: "Vision API failed" },
-      });
+    if (!imageAnalysis.ok) {
+      console.error("❌ Image analysis failed:", imageData);
+      return res.status(imageAnalysis.status).json({ error: imageData.error });
     }
 
-    const imageDescription = visionData.choices[0].message.content;
-    console.log("✅ Image analyzed!");
-    console.log("📝 Description length:", imageDescription.length);
+    const imageDescription = imageData.choices[0].message.content;
+    console.log("✅ Image analyzed");
 
-    console.log("🎨 Step 2: Generating with DALL-E 3...");
+    // КРОК 3: ГЕНЕРАЦІЯ з обома описами
+    console.log("🎨 Generating with DALL-E 3...");
 
     const dallePrompt = `${imageDescription}
 
-CRITICAL MODIFICATION:
-Add a classic solid black baseball cap on the character's head. The cap must have these exact specifications:
-- Solid black color, no holes, no stitching visible on top
-- Smooth, clean, natural shape
-- White 8-pointed star logo perfectly centered on the front panel
-- The star must be bright white, crisp, with 8 evenly-spaced sharp points
-- Cap slightly rotated to the left (brim turned slightly left)
-- Cap must fit naturally with realistic shadows and perspective
-- Character with cap must be fully visible, cap not cropped
+CRITICAL MODIFICATION - Add a cap:
+Add a classic solid black baseball cap on the character's head. The cap must have this EXACT logo on the front panel:
 
-IMPORTANT: Keep EVERYTHING else EXACTLY as described above - same background, same lighting, same colors, same style, same character details. Only add the cap.`;
+${logoDescription}
 
-    console.log("📤 Prompt length:", dallePrompt.length);
+The logo must be:
+- EXACTLY as described above - precise shape, proportions, angles
+- Centered perfectly on the front of the cap
+- Bright and crisp with high contrast against the black cap
+- The star/logo should be the EXACT shape specified
+
+The cap should:
+- Be solid black with no holes or stitching visible
+- Fit naturally on the character's head
+- Have realistic shadows and perspective
+- Be slightly rotated to the left (brim turned left)
+- Be fully visible, not cropped
+
+IMPORTANT: Keep EVERYTHING else EXACTLY as described - same character, same background, same lighting, same colors, same pose, same style. ONLY add the cap with logo.`;
+
+    console.log("Prompt length:", dallePrompt.length);
 
     const dalleResponse = await fetch(
       "https://api.openai.com/v1/images/generations",
@@ -140,7 +174,7 @@ IMPORTANT: Keep EVERYTHING else EXACTLY as described above - same background, sa
           prompt: dallePrompt,
           n: 1,
           size: "1024x1024",
-          quality: "standard", // або "hd" для кращої якості
+          quality: "hd", // Висока якість для точності
         }),
       }
     );
@@ -149,56 +183,26 @@ IMPORTANT: Keep EVERYTHING else EXACTLY as described above - same background, sa
 
     if (!dalleResponse.ok) {
       console.error("❌ DALL-E error:", dalleData);
-      return res.status(dalleResponse.status).json({
-        error: dalleData.error || { message: "DALL-E generation failed" },
-      });
+      return res.status(dalleResponse.status).json({ error: dalleData.error });
     }
 
-    const generatedImageUrl = dalleData.data[0].url;
-    const revisedPrompt = dalleData.data[0].revised_prompt;
+    const imageUrl = dalleData.data[0].url;
+    console.log("✅ Image generated");
 
-    console.log("✅ Image generated!");
-    console.log("🔗 URL:", generatedImageUrl);
-    console.log("📝 Revised prompt:", revisedPrompt?.substring(0, 200) + "...");
+    // Завантажуємо та конвертуємо
+    const imgResp = await fetch(imageUrl);
+    const imgBuffer = await imgResp.buffer();
+    const base64 = imgBuffer.toString("base64");
 
-    // КРОК 3: ЗАВАНТАЖУЄМО ЗОБРАЖЕННЯ
-    console.log("📥 Step 3: Downloading generated image...");
+    console.log("✅ SUCCESS");
 
-    const imageResponse = await fetch(generatedImageUrl);
-    if (!imageResponse.ok) {
-      throw new Error("Failed to download generated image");
-    }
-
-    const imageBuffer = await imageResponse.buffer();
-    const base64Result = imageBuffer.toString("base64");
-
-    console.log("✅ SUCCESS! Sending to frontend...");
-    console.log("📦 Base64 size:", base64Result.length);
-
-    res.json({
-      data: [
-        {
-          b64_json: base64Result,
-          revised_prompt: revisedPrompt, 
-        },
-      ],
-    });
+    res.json({ data: [{ b64_json: base64 }] });
   } catch (err) {
-    console.error("=== CRITICAL ERROR ===");
-    console.error("Type:", err.constructor.name);
-    console.error("Message:", err.message);
-    console.error("Stack:", err.stack);
-
-    res.status(500).json({
-      error: {
-        message: err.message || "Internal server error",
-      },
-    });
+    console.error("❌ ERROR:", err);
+    res.status(500).json({ error: { message: err.message } });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🔑 API Key present: ${!!process.env.API_KEY}`);
+app.listen(process.env.PORT || 3000, () => {
+  console.log("🚀 Server running");
 });
