@@ -59,6 +59,25 @@ app.post("/edit-image", upload.array("images"), async (req, res) => {
   }
 });
 
+console.log("OpenAI responded with status:", response.status);
+
+const text = await response.text(); 
+console.log("Raw OpenAI response:", text);
+
+let data;
+try {
+  data = JSON.parse(text);
+} catch (err) {
+  console.log("JSON parse error:", err.message);
+}
+
+
 app.listen(3000, () => {
   console.log("Backend запущено на порту 3000");
 });
+
+console.log("===== NEW REQUEST =====");
+console.log("Files received:", files.length);
+console.log("Prompt:", prompt);
+console.log("Sending request to OpenAI...");
+
