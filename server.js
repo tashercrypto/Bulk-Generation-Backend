@@ -23,7 +23,8 @@ app.use(
   })
 );
 
-app.post("/edit-image", upload.array("images"), async (req, res) => {
+app.post("/edit-image", upload.any(), async (req, res) => {
+
   console.log("===== NEW REQUEST =====");
 
   try {
