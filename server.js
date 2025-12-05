@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import multer from "multer";
-import FormData from "form-data";  
+import FormData from "form-data";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 
@@ -23,7 +23,8 @@ app.use(
   })
 );
 
-app.post("/edit-image", upload.array("images"), async (req, res) => {
+// Головний endpoint
+app.post("/generate-image", upload.array("images"), async (req, res) => {
   try {
     const files = req.files;
     const prompt = req.body.prompt;
@@ -32,7 +33,6 @@ app.post("/edit-image", upload.array("images"), async (req, res) => {
       return res.status(400).json({ error: "No images uploaded" });
     }
 
-    // FormData для Node.js
     const formData = new FormData();
 
     files.forEach((file) => {
@@ -54,7 +54,6 @@ app.post("/edit-image", upload.array("images"), async (req, res) => {
     });
 
     const data = await response.json();
-
     res.json(data);
 
   } catch (err) {
