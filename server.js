@@ -46,7 +46,7 @@ async function analyzeLogo(logoBuffer, mimeType, apiKey) {
             content: [
               {
                 type: "text",
-                text: "Describe this logo in EXTREME detail. Include: exact number of points/rays, their shape (sharp/rounded), angles between rays, proportions, colors (exact shades), line thickness, style. Be mathematical and precise - this will be used to recreate the logo exactly on a baseball cap.",
+                text: "Describe this logo in EXTREME detail. Include: exact number of points/rays, their shape (sharp/rounded), angles between rays, proportions, colors (exact shades), line thickness, style. Be mathematical and precise.",
               },
               {
                 type: "image_url",
@@ -67,7 +67,7 @@ async function analyzeLogo(logoBuffer, mimeType, apiKey) {
 
     const data = await response.json();
     const description = data.choices[0].message.content;
-    console.log("✅ Logo analyzed:", description.substring(0, 200) + "...");
+    console.log("✅ Logo analyzed:", description.substring(0, 150) + "...");
     return description;
 
   } catch (error) {
@@ -105,45 +105,76 @@ app.post("/generate-image", upload.fields([
       );
     }
 
-    // КРОК 2: Короткий англійський промпт для /images/edits
-    // OpenAI /images/edits працює КРАЩЕ з короткими промптами!
+    // КРОК 2: Короткий промпт
     const prompt = `Add a solid black baseball cap with this logo: ${logoDescription.substring(0, 200)}. Keep everything else unchanged.`;
     
     console.log("✅ Prompt:", prompt);
-    console.log("📏 Prompt length:", prompt.length, "chars");
 
-    // КРОК 3: Конвертація зображення в PNG з альфа-каналом
-    console.log("🔄 Converting image to PNG...");
+    // КРОК 3: Конвертація в PNG з RGBA (КРИТИЧНО!)
+    console.log("🔄 Converting image to PNG with RGBA...");
 
-    const pngBuffer = await sharp(imageFile.buffer)
-      .resize(1024, 1024, {
-        fit: "cover",
-        position: "center",
-      })
-      .ensureAlpha() // Обов'язково для /images/edits
-      .png({
-        quality: 100,
-        compressionLevel: 6,
-      })
-      .toBuffer();
+    let pngBuffer;
+    
+    try {
+      // Спочатку читаємо метадані
+      const metadata = await sharp(imageFile.buffer).metadata();
+      console.log("📊 Input format:", metadata.format, "channels:", metadata.channels);
+
+      // Конвертуємо з ПРИМУСОВИМ додаванням альфа-каналу
+      pngBuffer = await sharp(imageFile.buffer)
+        .resize(1024, 1024, {
+          fit: "cover",
+          position: "center",
+        })
+        .toFormat("png") // Конвертуємо в PNG
+        .ensureAlpha() // Додаємо альфа-канал (RGBA)
+        .png({
+          quality: 100,
+          compressionLevel: 6,
+          force: true, // Форсуємо PNG
+        })
+        .toBuffer();
+
+      // Перевіряємо результат
+      const outputMetadata = await sharp(pngBuffer).metadata();
+      console.log("✅ Output format:", outputMetadata.format, "channels:", outputMetadata.channels);
+
+      if (outputMetadata.channels < 4) {
+        console.warn("⚠️ Not RGBA, forcing alpha channel...");
+        
+        // Якщо все ще не RGBA - додаємо вручну
+        pngBuffer = await sharp(pngBuffer)
+          .ensureAlpha()
+          .png({ force: true })
+          .toBuffer();
+        
+        const finalMetadata = await sharp(pngBuffer).metadata();
+        console.log("✅ Final format:", finalMetadata.format, "channels:", finalMetadata.channels);
+      }
+
+    } catch (sharpError) {
+      console.error("❌ Sharp conversion error:", sharpError);
+      return res.status(400).json({
+        error: { message: `Image conversion failed: ${sharpError.message}` }
+      });
+    }
 
     console.log("✅ PNG created:", pngBuffer.length, "bytes");
 
     // Перевірка розміру (OpenAI ліміт: 4MB)
-    let finalBuffer = pngBuffer;
     if (pngBuffer.length > 4 * 1024 * 1024) {
       console.warn("⚠️ Image too large, compressing...");
-      finalBuffer = await sharp(pngBuffer)
+      pngBuffer = await sharp(pngBuffer)
         .png({ quality: 85, compressionLevel: 9 })
         .toBuffer();
-      console.log("✅ Compressed to:", finalBuffer.length, "bytes");
+      console.log("✅ Compressed to:", pngBuffer.length, "bytes");
     }
 
     // КРОК 4: Формуємо FormData для OpenAI
     const { default: FormDataNode } = await import("form-data");
     const formData = new FormDataNode();
 
-    formData.append("image", finalBuffer, {
+    formData.append("image", pngBuffer, {
       filename: "image.png",
       contentType: "image/png",
     });
@@ -151,8 +182,6 @@ app.post("/generate-image", upload.fields([
     formData.append("prompt", prompt);
     formData.append("n", 1);
     formData.append("size", "1024x1024");
-
-    // ❗ НЕ додаємо "model" - DALL-E 2 використовується автоматично
 
     console.log("📤 Sending to OpenAI /images/edits...");
 
@@ -179,7 +208,7 @@ app.post("/generate-image", upload.fields([
       });
     }
 
-    // КРОК 6: Отримуємо URL зображення
+    // КРОК 6: Отримуємо URL
     if (!responseData.data || !responseData.data[0] || !responseData.data[0].url) {
       console.error("❌ Invalid response:", responseData);
       return res.status(500).json({
